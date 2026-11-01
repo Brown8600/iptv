@@ -26,8 +26,33 @@ jobs:
     - name: Install Jekyll dependencies
       run: bundle install
 
+    # 说明 / Note:
+    #   本仓库是 fork，发布在 <user>.github.io/<repo>/ 子路径下，
+    #   而主题把 CSS/JS/favicon 写成根绝对路径（/assets/...），在子路径下必然 404。
+    #   这里用 --baseurl 注入子路径前缀，让 relative_url 生效。
+    #   This fork is published under a project-page subpath, so the theme's
+    #   root-absolute asset paths would 404; --baseurl injects the prefix.
     - name: Build Jekyll site
-      run: bundle exec jekyll build
+      run: bundle exec jekyll build --baseurl "/${GITHUB_REPOSITORY#*/}"
+
+    # 兜底 / fallback: 主题或页面里若有写死的根绝对引用，补上子路径前缀。
+    # 只在未加前缀的形式上匹配，重复执行安全。
+    - name: Fix leftover root-absolute paths
+      run: |
+        P="/${GITHUB_REPOSITORY#*/}"
+        find _site -name '*.html' -print0 | xargs -0 -r sed -i -E \
+          -e "s#(href|src)=\"/assets/#\1=\"${P}/assets/#g" \
+          -e "s#(href|src)=\"/favicon#\1=\"${P}/favicon#g" \
+          -e "s#href=\"/\"#href=\"${P}/\"#g"
+        echo "--- 残留检查 / leftover check ---"
+        left=$(grep -rhoE '(href|src)="/[^"]*"' _site --include='*.html' \
+                 | grep -vE "=\"${P}/" | grep -vE '="//' | sort -u || true)
+        if [ -n "$left" ]; then
+          echo "⚠️ 仍有未加前缀的根绝对引用 / remaining root-absolute refs:"
+          echo "$left"
+        else
+          echo "✅ 无未加前缀的根绝对引用 / no leftover root-absolute refs"
+        fi
 
     - name: Deploy to gh branch
       uses: peaceiris/actions-gh-pages@v3
